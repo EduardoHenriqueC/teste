@@ -2345,7 +2345,40 @@ const NEWS_FEEDS = [
     'https://feeds.bbci.co.uk/sport/rss.xml',
     'https://www.espn.com/espn/rss/news'
 ];
-const NEWS_PROXY = 'https://api.allorigins.win/get?url=';
+const NEWS_PROXIES = [
+    'https://api.allorigins.win/raw?url=',
+    'https://api.codetabs.com/v1/proxy?quest=',
+    'https://thingproxy.freeboard.io/fetch/'
+];
+
+async function fetchProxyFeed(feedUrl) {
+    let lastError = null;
+    for (const proxy of NEWS_PROXIES) {
+        try {
+            const response = await fetch(proxy + encodeURIComponent(feedUrl), { mode: 'cors' });
+            if (!response.ok) {
+                lastError = new Error(`Proxy ${proxy} retornou ${response.status}`);
+                continue;
+            }
+
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                const payload = await response.json();
+                const contents = payload?.contents || payload?.contents;
+                if (!contents) {
+                    lastError = new Error(`Proxy ${proxy} retornou JSON inválido`);
+                    continue;
+                }
+                return contents;
+            }
+
+            return await response.text();
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    throw lastError || new Error('Não foi possível acessar o proxy de notícias');
+}
 
 async function fetchNewsFeed() {
     const container = document.getElementById('news-grid');
@@ -2357,18 +2390,7 @@ async function fetchNewsFeed() {
 
     try {
         const feedUrl = NEWS_FEEDS[Math.floor(Math.random() * NEWS_FEEDS.length)];
-        const response = await fetch(NEWS_PROXY + encodeURIComponent(feedUrl));
-        if (!response.ok) throw new Error('Falha ao buscar feed');
-
-        let rssText = '';
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-            const payload = await response.json();
-            rssText = payload?.contents || '';
-        } else {
-            rssText = await response.text();
-        }
-
+        const rssText = await fetchProxyFeed(feedUrl);
         if (!rssText) throw new Error('Feed vazio');
 
         const parser = new DOMParser();
