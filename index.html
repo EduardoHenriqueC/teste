@@ -2350,6 +2350,29 @@ const NEWS_PROXIES = [
     'https://api.codetabs.com/v1/proxy?quest=',
     'https://thingproxy.freeboard.io/fetch/'
 ];
+const NEWS_FALLBACK = [
+    {
+        title: 'Atualização esportiva: rodada intensa no futebol europeu',
+        link: '#',
+        description: 'Jogos decisivos mantêm as tabelas apertadas enquanto grandes clubes disputam cada ponto.',
+        pubDate: 'Agora',
+        image: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=900&q=80'
+    },
+    {
+        title: 'NBA em alta: recorde de assistência em jogo épico',
+        link: '#',
+        description: 'A partida teve virada nos minutos finais e uma exibição de pura habilidade de estrelas internacionais.',
+        pubDate: 'Hoje',
+        image: 'https://images.unsplash.com/photo-1516265267762-4877f2a4f2fb?auto=format&fit=crop&w=900&q=80'
+    },
+    {
+        title: 'Fórmula 1: estratégias de pista abrem caminho para o pódio',
+        link: '#',
+        description: 'A corrida trouxe surpresas e manobras ousadas, com os líderes lutando por cada curva.',
+        pubDate: 'Hoje',
+        image: 'https://images.unsplash.com/photo-1527443154391-507e9dc6c5cc?auto=format&fit=crop&w=900&q=80'
+    }
+];
 
 async function fetchProxyFeed(feedUrl) {
     let lastError = null;
@@ -2361,18 +2384,23 @@ async function fetchProxyFeed(feedUrl) {
                 continue;
             }
 
+            let text = await response.text();
             const contentType = response.headers.get('content-type') || '';
             if (contentType.includes('application/json')) {
-                const payload = await response.json();
-                const contents = payload?.contents || payload?.contents;
-                if (!contents) {
-                    lastError = new Error(`Proxy ${proxy} retornou JSON inválido`);
-                    continue;
+                let payload;
+                try {
+                    payload = JSON.parse(text);
+                } catch {
+                    payload = null;
                 }
-                return contents;
+                text = payload?.contents || payload?.content || '';
             }
 
-            return await response.text();
+            if (!text || !/(<rss|<feed)/i.test(text)) {
+                lastError = new Error(`Proxy ${proxy} retornou conteúdo inválido`);
+                continue;
+            }
+            return text;
         } catch (error) {
             lastError = error;
         }
@@ -2396,8 +2424,12 @@ async function fetchNewsFeed() {
         const parser = new DOMParser();
         const xml = parser.parseFromString(rssText, 'application/xml');
         const items = Array.from(xml.querySelectorAll('item')).slice(0, 8);
-        if (items.length === 0) throw new Error('Nenhuma notícia encontrada');
-        renderNewsItems(items);
+        if (items.length === 0) {
+            console.warn('Nenhum item encontrado no feed. Usando fallback estático.');
+            renderNewsItems(NEWS_FALLBACK);
+        } else {
+            renderNewsItems(items);
+        }
         loading.style.display = 'none';
     } catch (error) {
         console.error('Erro ao carregar notícias:', error);
@@ -2410,18 +2442,19 @@ function renderNewsItems(items) {
     const container = document.getElementById('news-grid');
     if (!container) return;
     container.innerHTML = items.map(item => {
-        const title = item.querySelector('title')?.textContent || 'Notícia sem título';
-        const link = item.querySelector('link')?.textContent || '#';
-        const description = item.querySelector('description')?.textContent || item.querySelector('summary')?.textContent || 'Resumo não disponível.';
-        const pubDate = item.querySelector('pubDate')?.textContent || '';
-        const image = getNewsImageFromItem(item);
-        const cleanDescription = description.replace(/<[^>]+>/g, '').slice(0, 140) + '...';
+        const title = item instanceof Element ? item.querySelector('title')?.textContent || 'Notícia sem título' : item.title;
+        const link = item instanceof Element ? item.querySelector('link')?.textContent || '#' : item.link || '#';
+        const description = item instanceof Element ? item.querySelector('description')?.textContent || item.querySelector('summary')?.textContent || 'Resumo não disponível.' : item.description;
+        const pubDate = item instanceof Element ? item.querySelector('pubDate')?.textContent || '' : item.pubDate || '';
+        const image = item instanceof Element ? getNewsImageFromItem(item) : item.image;
+        const cleanDescription = (description || 'Resumo não disponível.').replace(/<[^>]+>/g, '').slice(0, 140) + '...';
+        const displayDate = pubDate ? (isNaN(Date.parse(pubDate)) ? pubDate : new Date(pubDate).toLocaleDateString('pt-BR')) : 'Atual';
         return `
             <article class="bg-surface-container rounded-3xl overflow-hidden border border-outline-variant shadow-sm hover:shadow-lg transition-all duration-300">
                 <a href="${link}" target="_blank" rel="noopener noreferrer" class="block">
                     <div class="relative h-64 overflow-hidden bg-[#111111]">
                         <img src="${image}" alt="Imagem da notícia" class="w-full h-full object-cover transition-transform duration-500 hover:scale-105" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=900&q=80'" />
-                        <span class="absolute bottom-3 left-3 bg-black/70 text-[10px] uppercase tracking-[0.2em] text-white px-3 py-1 rounded">${pubDate ? new Date(pubDate).toLocaleDateString('pt-BR') : 'Atual'}</span>
+                        <span class="absolute bottom-3 left-3 bg-black/70 text-[10px] uppercase tracking-[0.2em] text-white px-3 py-1 rounded">${displayDate}</span>
                     </div>
                     <div class="p-6">
                         <h3 class="text-on-surface font-bold text-xl mb-3 line-clamp-2">${title}</h3>
@@ -2436,8 +2469,16 @@ function renderNewsItems(items) {
 
 function getNewsImageFromItem(item) {
     const enclosure = item.querySelector('enclosure[url]');
-    const media = item.querySelector('media\:content, content');
-    const imageUrl = enclosure?.getAttribute('url') || media?.getAttribute('url') || media?.getAttribute('href');
+    const media = item.querySelector('media\\:content');
+    const thumbnail = item.querySelector('media\\:thumbnail');
+
+    let imageUrl = enclosure?.getAttribute('url') || media?.getAttribute('url') || media?.getAttribute('href') || thumbnail?.getAttribute('url');
+    if (!imageUrl) {
+        const description = item.querySelector('description')?.textContent || '';
+        const match = description.match(/https?:\/\/[\w\-./?=&#%]+\.(jpg|jpeg|png|webp)/i);
+        imageUrl = match?.[0] || '';
+    }
+
     if (imageUrl && imageUrl.startsWith('http')) return imageUrl;
     return 'https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=900&q=80';
 }
