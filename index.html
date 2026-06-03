@@ -2374,6 +2374,25 @@ const NEWS_FALLBACK = [
     }
 ];
 
+const NEWS_IMAGE_FALLBACKS = [
+    'https://images.unsplash.com/photo-1521412644187-c49fa049e84d?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1505842465776-3d9166a538d8?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1519985176271-adb1088fa94c?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1508606572321-901ea4437072?auto=format&fit=crop&w=900&q=80'
+];
+
+function getFallbackImage(key = '') {
+    if (!key) return NEWS_IMAGE_FALLBACKS[0];
+    let hash = 0;
+    for (let i = 0; i < key.length; i += 1) {
+        hash = ((hash << 5) - hash) + key.charCodeAt(i);
+        hash |= 0;
+    }
+    return NEWS_IMAGE_FALLBACKS[Math.abs(hash) % NEWS_IMAGE_FALLBACKS.length];
+}
+
 async function fetchProxyFeed(feedUrl) {
     let lastError = null;
     for (const proxy of NEWS_PROXIES) {
@@ -2446,7 +2465,11 @@ function renderNewsItems(items) {
         const link = item instanceof Element ? item.querySelector('link')?.textContent || '#' : item.link || '#';
         const description = item instanceof Element ? item.querySelector('description')?.textContent || item.querySelector('summary')?.textContent || 'Resumo não disponível.' : item.description;
         const pubDate = item instanceof Element ? item.querySelector('pubDate')?.textContent || '' : item.pubDate || '';
-        const image = item instanceof Element ? getNewsImageFromItem(item) : item.image;
+        const fallbackKey = title || link || description;
+        let image = item instanceof Element ? getNewsImageFromItem(item, fallbackKey) : item.image;
+        if (!image) {
+            image = getFallbackImage(fallbackKey);
+        }
         const cleanDescription = (description || 'Resumo não disponível.').replace(/<[^>]+>/g, '').slice(0, 140) + '...';
         const displayDate = pubDate ? (isNaN(Date.parse(pubDate)) ? pubDate : new Date(pubDate).toLocaleDateString('pt-BR')) : 'Atual';
         return `
@@ -2480,7 +2503,8 @@ function getNewsImageFromItem(item) {
     }
 
     if (imageUrl && imageUrl.startsWith('http')) return imageUrl;
-    return 'https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=900&q=80';
+    const title = item.querySelector('title')?.textContent || item.querySelector('link')?.textContent || item.querySelector('description')?.textContent || '';
+    return getFallbackImage(title);
 }
 
 function addChatMessage(message) {
